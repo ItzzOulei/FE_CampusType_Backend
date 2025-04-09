@@ -7,6 +7,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
+import java.util.stream.Collectors; // Add this import
 
 @Service
 public class TypingResultService {
@@ -34,19 +36,29 @@ public class TypingResultService {
     }
 
     public List<TypingResult> getLeaderboard(String sortBy, String order, int limit, Integer minWpm, Integer words) {
-        List<TypingResult> topResults = resultRepository.findTopResults();
+        List<TypingResult> allResults = resultRepository.findTopResults(); // All results sorted by WPM DESC
 
         if (minWpm != null) {
-            topResults = topResults.stream()
+            allResults = allResults.stream()
                     .filter(result -> result.getWpm() >= minWpm)
                     .toList();
         }
 
         if (words != null) {
-            topResults = topResults.stream()
+            allResults = allResults.stream()
                     .filter(result -> result.getWords() == words)
                     .toList();
         }
+
+        List<TypingResult> topResults = allResults.stream()
+                .collect(Collectors.groupingBy(
+                        TypingResult::getUser,
+                        Collectors.maxBy(Comparator.comparingInt(TypingResult::getWpm))
+                ))
+                .values()
+                .stream()
+                .map(Optional::get)
+                .toList();
 
         Comparator<TypingResult> comparator;
         switch (sortBy.toLowerCase()) {
