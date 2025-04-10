@@ -15,4 +15,8 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     @Query("SELECT u FROM User u WHERE LOWER(u.username) = LOWER(:username)")
     Optional<User> findByUsername(String username);
+
+    @Query("SELECT new net.ictcampus.campustype.models.User(u.id, u.username, u.email, u.bio, u.keyboard) " +
+            "FROM User u WHERE u.id = :id")
+    Optional<User> findByIdNoPassword(Long id);
 }

@@ -19,13 +19,12 @@ public class UserService {
 
     public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder; // Expected to be BCryptPasswordEncoder
+        this.passwordEncoder = passwordEncoder;
     }
 
-    // Methode zum Abrufen eines Users anhand der ID
     public User getUserById(Long id) {
         logger.info("Attempting to fetch user with ID: {}", id);
-        Optional<User> userOptional = userRepository.findById(id);
+        Optional<User> userOptional = userRepository.findByIdNoPassword(id);
         if (userOptional.isPresent()) {
             logger.info("User found with ID: {}", id);
             return userOptional.get();
@@ -35,7 +34,6 @@ public class UserService {
         }
     }
 
-    // Methode zum Aktualisieren eines Users
     public User updateUser(Long id, User updatedUser) {
         logger.info("Attempting to update user with ID: {}", id);
         Optional<User> userOptional = userRepository.findById(id);
@@ -49,10 +47,20 @@ public class UserService {
                 existingUser.setEmail(updatedUser.getEmail());
                 logger.debug("Updated email to: {}", updatedUser.getEmail());
             }
-            if (updatedUser.getPassword() != null && !updatedUser.getPassword().isEmpty()) {
+            if (updatedUser.getPassword() != null && !updatedUser.getPassword().trim().isEmpty()) {
                 String encodedPassword = passwordEncoder.encode(updatedUser.getPassword());
                 existingUser.setPassword(encodedPassword);
-                logger.debug("Updated password to bcrypt-encoded value");
+                logger.debug("Updated password to bcrypt-encoded value: {}", encodedPassword);
+            } else {
+                Optional<User> userByEmailOptional = userRepository.findByEmail(existingUser.getEmail());
+                if (userByEmailOptional.isPresent()) {
+                    String existingPassword = userByEmailOptional.get().getPassword();
+                    existingUser.setPassword(existingPassword);
+                    logger.debug("Password not provided or empty; reapplied existing password from DB: {}", existingPassword);
+                } else {
+                    logger.error("Could not find user by email {} to reapply password", existingUser.getEmail());
+                    throw new RuntimeException("User with email " + existingUser.getEmail() + " not found");
+                }
             }
             if (updatedUser.getBio() != null) {
                 existingUser.setBio(updatedUser.getBio());

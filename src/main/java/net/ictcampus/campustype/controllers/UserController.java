@@ -29,8 +29,8 @@ public class UserController {
     private static final Logger logger = LoggerFactory.getLogger(UserController.class);
 
     private final UserService userService;
-    private final JwtUtil jwtUtil; // Optional: for token regeneration
-    private final CustomUserDetailsService userDetailsService; // Optional: for token regeneration
+    private final JwtUtil jwtUtil;
+    private final CustomUserDetailsService userDetailsService;
 
     public UserController(UserService userService, JwtUtil jwtUtil, CustomUserDetailsService userDetailsService) {
         this.userService = userService;
@@ -75,19 +75,15 @@ public class UserController {
             @Parameter(description = "ID of the user to update", required = true)
             @PathVariable Long id,
             @Parameter(description = "Updated user details", required = true)
-            @Valid @RequestBody User updatedUser) {
+            @RequestBody User updatedUser) { // Removed @Valid
         logger.info("Received request to update user with ID: {}", id);
         try {
-            // Update the user in the database (password will be bcrypt-encoded)
             User user = userService.updateUser(id, updatedUser);
 
-            // Load updated UserDetails for token regeneration
             UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
 
-            // Regenerate the token with updated details
             String newToken = jwtUtil.generateToken(userDetails, user.getUsername(), user.getId());
 
-            // Prepare response with user and new token
             Map<String, Object> response = new HashMap<>();
             response.put("user", user);
             response.put("token", newToken);
