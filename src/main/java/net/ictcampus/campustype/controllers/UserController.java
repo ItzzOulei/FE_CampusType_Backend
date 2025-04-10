@@ -8,12 +8,18 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import net.ictcampus.campustype.models.User;
+import net.ictcampus.campustype.security.JwtUtil;
+import net.ictcampus.campustype.services.CustomUserDetailsService;
 import net.ictcampus.campustype.services.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.HashMap;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/users")
@@ -23,9 +29,13 @@ public class UserController {
     private static final Logger logger = LoggerFactory.getLogger(UserController.class);
 
     private final UserService userService;
+    private final JwtUtil jwtUtil; // Optional: for token regeneration
+    private final CustomUserDetailsService userDetailsService; // Optional: for token regeneration
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, JwtUtil jwtUtil, CustomUserDetailsService userDetailsService) {
         this.userService = userService;
+        this.jwtUtil = jwtUtil;
+        this.userDetailsService = userDetailsService;
     }
 
     @Operation(summary = "Get a user by ID", description = "Retrieves a user's details by their ID. Requires authentication.")
@@ -52,9 +62,9 @@ public class UserController {
         }
     }
 
-    @Operation(summary = "Update a user by ID", description = "Updates a user's details by their ID. Requires authentication.")
+    @Operation(summary = "Update a user by ID", description = "Updates a user's details by their ID and regenerates JWT token. Requires authentication.")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "User updated successfully"),
+            @ApiResponse(responseCode = "200", description = "User updated successfully with new token"),
             @ApiResponse(responseCode = "400", description = "Invalid input - Validation failed"),
             @ApiResponse(responseCode = "401", description = "Unauthorized - Authentication required"),
             @ApiResponse(responseCode = "404", description = "User not found")
@@ -68,8 +78,22 @@ public class UserController {
             @Valid @RequestBody User updatedUser) {
         logger.info("Received request to update user with ID: {}", id);
         try {
+            // Update the user in the database (password will be bcrypt-encoded)
             User user = userService.updateUser(id, updatedUser);
-            return ResponseEntity.ok(user);
+
+            // Load updated UserDetails for token regeneration
+            UserDetails userDetails = userDetailsService.loadUserByUsername(user.getEmail());
+
+            // Regenerate the token with updated details
+            String newToken = jwtUtil.generateToken(userDetails, user.getUsername(), user.getId());
+
+            // Prepare response with user and new token
+            Map<String, Object> response = new HashMap<>();
+            response.put("user", user);
+            response.put("token", newToken);
+
+            logger.info("User with ID {} updated and new token generated", id);
+            return ResponseEntity.ok(response);
         } catch (RuntimeException e) {
             logger.error("Error updating user with ID {}: {}", id, e.getMessage());
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());

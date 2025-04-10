@@ -19,7 +19,7 @@ public class UserService {
 
     public UserService(UserRepository userRepository, PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
-        this.passwordEncoder = passwordEncoder;
+        this.passwordEncoder = passwordEncoder; // Expected to be BCryptPasswordEncoder
     }
 
     // Methode zum Abrufen eines Users anhand der ID
@@ -43,18 +43,24 @@ public class UserService {
             User existingUser = userOptional.get();
             if (updatedUser.getUsername() != null) {
                 existingUser.setUsername(updatedUser.getUsername());
+                logger.debug("Updated username to: {}", updatedUser.getUsername());
             }
             if (updatedUser.getEmail() != null) {
                 existingUser.setEmail(updatedUser.getEmail());
+                logger.debug("Updated email to: {}", updatedUser.getEmail());
             }
             if (updatedUser.getPassword() != null && !updatedUser.getPassword().isEmpty()) {
-                existingUser.setPassword(passwordEncoder.encode(updatedUser.getPassword()));
+                String encodedPassword = passwordEncoder.encode(updatedUser.getPassword());
+                existingUser.setPassword(encodedPassword);
+                logger.debug("Updated password to bcrypt-encoded value");
             }
             if (updatedUser.getBio() != null) {
                 existingUser.setBio(updatedUser.getBio());
+                logger.debug("Updated bio to: {}", updatedUser.getBio());
             }
             if (updatedUser.getKeyboard() != null) {
                 existingUser.setKeyboard(updatedUser.getKeyboard());
+                logger.debug("Updated keyboard to: {}", updatedUser.getKeyboard());
             }
             User savedUser = userRepository.save(existingUser);
             logger.info("User with ID {} successfully updated", id);
@@ -65,7 +71,6 @@ public class UserService {
         }
     }
 
-    // Neue Methode zum Löschen eines Users
     public void deleteUser(Long id) {
         logger.info("Attempting to delete user with ID: {}", id);
         Optional<User> userOptional = userRepository.findById(id);
