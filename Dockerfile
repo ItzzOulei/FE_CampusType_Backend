@@ -5,7 +5,7 @@ FROM eclipse-temurin:17-jdk-alpine
 WORKDIR /app
 
 # Copy build output
-COPY build/libs/*.jar app.jar
+COPY build/libs/CampusType-0.0.1-SNAPSHOT.jar app.jar
 
 # Expose port (Spring Boot default)
 EXPOSE 8080
