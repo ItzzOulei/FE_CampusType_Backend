@@ -8,6 +8,6 @@ import org.springframework.data.jpa.repository.Query;
 import java.util.List;
 
 public interface WordsRepository extends JpaRepository<Words, String> {
-    @Query(value = "SELECT * FROM Words ORDER BY RAND() LIMIT :amount", nativeQuery = true)
+    @Query(value = "SELECT * FROM words ORDER BY RAND() LIMIT :amount", nativeQuery = true)
     List<Words> findRandomWords(int amount);
 }

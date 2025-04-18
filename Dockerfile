@@ -1,14 +1,13 @@
-# Use a lightweight Java image
-FROM eclipse-temurin:17-jdk-alpine
-
-# Set the working directory
+# Build stage
+FROM gradle:8.10.2-jdk17 AS build
 WORKDIR /app
+COPY build.gradle settings.gradle ./
+COPY src ./src
+RUN gradle build --no-daemon
 
-# Copy build output
-COPY build/libs/CampusType-0.0.1-SNAPSHOT.jar app.jar
-
-# Expose port (Spring Boot default)
+# Package stage
+FROM amazoncorretto:17-alpine
+WORKDIR /app
+COPY --from=build /app/build/libs/CampusType-0.0.1-SNAPSHOT.jar app.jar
 EXPOSE 8080
-
-# Start the application
 ENTRYPOINT ["java", "-jar", "app.jar"]
