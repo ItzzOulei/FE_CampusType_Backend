@@ -38,7 +38,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/leaderboard").permitAll()
                         .requestMatchers("/api/results/{userId}").permitAll()
-                        .requestMatchers( "/api/words/**", "/api/words", "/api/run/**", "/api/start-test").permitAll()
+                        .requestMatchers( "/api/words/**", "/api/words", "/api/run/**", "/api/start-test", "/api/generate-test-token").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/users/**").permitAll()
                         .anyRequest().authenticated()

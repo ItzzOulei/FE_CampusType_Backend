@@ -1,5 +1,10 @@
 package net.ictcampus.campustype.controllers;
 
+import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.ExpiredJwtException;
+import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.SignatureException;
+import io.jsonwebtoken.MalformedJwtException;
 import jakarta.servlet.http.HttpServletRequest;
 import net.ictcampus.campustype.models.TypingResult;
 import net.ictcampus.campustype.models.User;
@@ -12,22 +17,30 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api")
 public class TypingController {
 
+    private static final Logger logger = LoggerFactory.getLogger(TypingController.class);
+
     private final UserRepository userRepository;
     private final TypingResultService typingResultService;
     private final JwtUtil jwtUtil;
     private final WordsService wordsService;
+    private final Set<String> usedTokens = Collections.synchronizedSet(new HashSet<>());
 
     @Autowired
     public TypingController(UserRepository userRepository, TypingResultService typingResultService, JwtUtil jwtUtil, WordsService wordsService) {
@@ -37,14 +50,14 @@ public class TypingController {
         this.wordsService = wordsService;
     }
 
-    @Operation(summary = "Start a typing test", description = "Generates a test sentence and returns a signed token")
+    @Operation(summary = "Start a typing test", description = "Generates a test sentence")
     @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "Test started with token"),
+            @ApiResponse(responseCode = "200", description = "Test sentence generated"),
             @ApiResponse(responseCode = "400", description = "Invalid word count")
     })
     @SecurityRequirement(name = "bearerAuth")
     @PostMapping("/start-test")
-    public ResponseEntity<?> startTest(@RequestParam int wordCount, HttpServletRequest request) {
+    public ResponseEntity<?> startTest(@RequestParam int wordCount) {
         if (wordCount <= 0) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Word count must be positive");
         }
@@ -53,11 +66,40 @@ public class TypingController {
             String sentence = words.stream()
                     .map(Words::getWord)
                     .collect(Collectors.joining(" "));
-            long startTime = System.currentTimeMillis();
-            String token = jwtUtil.generateTestToken(sentence, startTime);
-            return ResponseEntity.ok(new TestStartResponse(token, sentence));
+            return ResponseEntity.ok(new TestStartResponse(null, sentence));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Error generating sentence: " + e.getMessage());
+        }
+    }
+
+    @Operation(summary = "Generate test token", description = "Generates a signed test token when user starts typing")
+    @ApiResponses(value = {
+            @ApiResponse(responseCode = "200", description = "Test token generated"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "401", description = "Unauthorized")
+    })
+    @SecurityRequirement(name = "bearerAuth")
+    @PostMapping("/generate-test-token")
+    public ResponseEntity<?> generateTestToken(@RequestBody TestTokenRequest request, HttpServletRequest httpRequest) {
+        try {
+            String authToken = httpRequest.getHeader("Authorization");
+            if (authToken == null || !authToken.startsWith("Bearer ")) {
+                logger.error("Missing or invalid Authorization header: {}", authToken);
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Missing or invalid Authorization header");
+            }
+            authToken = authToken.substring(7);
+            logger.debug("Extracting userId from token: {}", authToken);
+            Long userId = jwtUtil.extractUserId(authToken);
+            long startTime = System.currentTimeMillis();
+            String token = jwtUtil.generateTestToken(request.getSentence(), startTime, userId);
+            logger.info("Generated test token for userId: {}", userId);
+            return ResponseEntity.ok(new TestTokenResponse(token, startTime));
+        } catch (JwtException e) {
+            logger.error("JWT validation failed: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Invalid JWT token: " + e.getMessage());
+        } catch (Exception e) {
+            logger.error("Error generating token: {}", e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error generating token: " + e.getMessage());
         }
     }
 
@@ -70,18 +112,44 @@ public class TypingController {
     @SecurityRequirement(name = "bearerAuth")
     @PostMapping("/results")
     public ResponseEntity<?> saveResult(@RequestBody TypingResult result, @RequestHeader("Test-Token") String testToken, HttpServletRequest request) {
+        if (usedTokens.contains(testToken)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Test token already used");
+        }
         try {
-            String authToken = request.getHeader("Authorization").substring(7);
+            String authToken = request.getHeader("Authorization");
+            if (authToken == null || !authToken.startsWith("Bearer ")) {
+                logger.error("Missing or invalid Authorization header: {}", authToken);
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body("Missing or invalid Authorization header");
+            }
+            authToken = authToken.substring(7);
             Long userId = jwtUtil.extractUserId(authToken);
-
             User user = userRepository.findById(userId)
                     .orElseThrow(() -> new IllegalArgumentException("User not found with ID: " + userId));
 
-            Long startTime = jwtUtil.extractStartTime(testToken);
-            String expectedSentence = jwtUtil.extractSentence(testToken);
+            Claims claims;
+            try {
+                claims = jwtUtil.getClaims(testToken);
+            } catch (SignatureException | MalformedJwtException e) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid test token signature");
+            } catch (ExpiredJwtException e) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Test token has expired");
+            } catch (JwtException e) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid test token");
+            }
+
+            Long startTime = claims.get("startTime", Long.class);
+            String expectedSentence = claims.get("sentence", String.class);
+            Long tokenUserId = claims.get("userId", Long.class);
+            if (!tokenUserId.equals(userId)) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Test token does not match user");
+            }
+
             double elapsedTime = (System.currentTimeMillis() - startTime) / 1000.0;
-            if (!expectedSentence.equals(result.getSentence()) || Math.abs(elapsedTime - result.getTime()) > 2.0) {
-                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid test token or timing mismatch");
+            if (!expectedSentence.equals(result.getSentence())) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid test token: sentence mismatch");
+            }
+            if (elapsedTime < 0 || elapsedTime > 600) { // Allow up to 10 minutes
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST).body("Invalid test duration");
             }
 
             if (!validateTypingResult(result)) {
@@ -90,10 +158,12 @@ public class TypingController {
 
             result.setUser(user);
             TypingResult savedResult = typingResultService.saveResult(result);
+            usedTokens.add(testToken); // Mark token as used
             return ResponseEntity.ok(savedResult);
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(e.getMessage());
         } catch (Exception e) {
+            logger.error("Error saving result: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error saving result: " + e.getMessage());
         }
     }
@@ -207,6 +277,7 @@ public class TypingController {
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(e.getMessage());
         } catch (Exception e) {
+            logger.error("Error retrieving result: {}", e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body("Error retrieving result: " + e.getMessage());
         }
     }
@@ -227,6 +298,38 @@ public class TypingController {
 
         public String getSentence() {
             return sentence;
+        }
+    }
+
+    // Helper class for /generate-test-token request
+    private static class TestTokenRequest {
+        private String sentence;
+
+        public String getSentence() {
+            return sentence;
+        }
+
+        public void setSentence(String sentence) {
+            this.sentence = sentence;
+        }
+    }
+
+    // Helper class for /generate-test-token response
+    private static class TestTokenResponse {
+        private final String token;
+        private final long startTime;
+
+        public TestTokenResponse(String token, long startTime) {
+            this.token = token;
+            this.startTime = startTime;
+        }
+
+        public String getToken() {
+            return token;
+        }
+
+        public long getStartTime() {
+            return startTime;
         }
     }
 }

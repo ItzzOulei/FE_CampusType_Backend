@@ -53,19 +53,30 @@ public class JwtUtil {
         return token;
     }
 
-    public String generateTestToken(String sentence, Long startTime) {
+    public String generateTestToken(String sentence, Long startTime, Long userId) {
         Map<String, Object> claims = new HashMap<>();
         claims.put("sentence", sentence);
         claims.put("startTime", startTime);
-        logger.info("Generating test token with sentence: {} and startTime: {}", sentence, startTime);
+        claims.put("userId", userId);
+        logger.info("Generating test token with sentence: {}, startTime: {}, userId: {}", sentence, startTime, userId);
         String token = Jwts.builder()
                 .setClaims(claims)
                 .setIssuedAt(new Date())
-                .setExpiration(new Date(System.currentTimeMillis() + EXPIRATION_TIME))
+                .setExpiration(new Date(System.currentTimeMillis() + 1000 * 60 * 10)) // 10 minutes
                 .signWith(SignatureAlgorithm.HS256, SECRET_KEY)
                 .compact();
         logger.info("Test token generated: {}", token);
         return token;
+    }
+
+    public Claims getClaims(String token) {
+        logger.debug("Extracting claims from token: {}", token);
+        try {
+            return Jwts.parser().setSigningKey(SECRET_KEY).parseClaimsJws(token).getBody();
+        } catch (Exception e) {
+            logger.error("Failed to extract claims from token: {}", e.getMessage(), e);
+            throw e;
+        }
     }
 
     public String extractUsername(String token) {
